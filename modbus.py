@@ -14,6 +14,8 @@ the guard construct that is available in python 2.5 and up::
 #---------------------------------------------------------------------------# 
 from pymodbus.client.sync import ModbusSerialClient as ModbusClient
 from ConfigReader import ConfigReader
+import MySQLdb
+import Slave
 #---------------------------------------------------------------------------# 
 # configure the client logging
 #---------------------------------------------------------------------------# 
@@ -21,6 +23,28 @@ import logging
 logging.basicConfig()
 log = logging.getLogger()
 log.setLevel(logging.DEBUG)
+#---------------------------------------------------------------------------#
+# connect to the database and retrieve user's sensors and times
+#---------------------------------------------------------------------------#
+configReader = ConfigReader("config.ini")
+database = configReader.GetSectionMap("DATABASE")
+db = MySQLdb.connect(database["ip"],database["user"],database["password"],"SENSORDB")
+sensorList = []
+cursor = db.cursor
+sql = "LIST TABLES"
+try:
+    cursor.execute(sql)
+    tables = cursor.fetchall()
+    for table in table:
+        sql = "SELECT id FROM %s" % (table)
+        cursor.execute(sql)
+        address = cursor.fetchone()
+        sql = "SELECT time FROM %s" % (table)
+        cursor.execute(sql)
+        time = cursor.fetchone()
+        sensorList.append(Slave(address,time,TimeOutHandler))
+except:
+    print("Unable to fetch data")
 
 #---------------------------------------------------------------------------# 
 # choose the client you want
@@ -51,13 +75,23 @@ log.setLevel(logging.DEBUG)
 #---------------------------------------------------------------------------# 
 #client = ModbusClient('localhost', port=5020)
 #client = ModbusClient(method='ascii', port='/dev/pts/2', timeout=1)
-configReader = ConfigReader("config.ini")
-sections = configReader.GetSectionMap("SERIAL");
-print(sections["baud"])
-exit()
-client = ModbusClient(method='rtu', port='/dev/ttyp0', timeout=1)
-client.connect()
+serial = configReader.GetSectionMap("SERIAL");
+print(serial['port'])
 
+client = ModbusClient(method='rtu', port=serial["port"], timeout=int(serial["timeout"]),
+                      baudrate = int(serial["baud"]), bytesize = int(serial["databits"]),
+                      stopbits = int(serial["stopbits"]), parity = serial["parity"],
+                      rtscts = int(serial["rtscts"]))
+client.connect()
+#---------------------------------------------------------------------------#
+# Run tick forever
+#---------------------------------------------------------------------------#
+import time
+starttime = time.time()
+while True:
+    for sensor in sensorList:
+        sensor.Tick()
+    time.sleep(60.0 - ((time.time() - starttime)%60.0))
 #---------------------------------------------------------------------------# 
 # specify slave to query
 #---------------------------------------------------------------------------# 
