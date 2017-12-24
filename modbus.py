@@ -15,7 +15,8 @@ the guard construct that is available in python 2.5 and up::
 from pymodbus.client.sync import ModbusSerialClient as ModbusClient
 from ConfigReader import ConfigReader
 import MySQLdb
-import Slave
+import time
+import sys
 #---------------------------------------------------------------------------# 
 # configure the client logging
 #---------------------------------------------------------------------------# 
@@ -24,156 +25,50 @@ logging.basicConfig()
 log = logging.getLogger()
 log.setLevel(logging.DEBUG)
 #---------------------------------------------------------------------------#
-# connect to the database and retrieve user's sensors and times
+# read config
 #---------------------------------------------------------------------------#
 configReader = ConfigReader("config.ini")
-database = configReader.GetSectionMap("DATABASE")
-db = MySQLdb.connect(database["ip"],database["user"],database["password"],"SENSORDB")
-sensorList = []
-cursor = db.cursor
-sql = "LIST TABLES"
-try:
-    cursor.execute(sql)
-    tables = cursor.fetchall()
-    for table in table:
-        sql = "SELECT id FROM %s" % (table)
-        cursor.execute(sql)
-        address = cursor.fetchone()
-        sql = "SELECT time FROM %s" % (table)
-        cursor.execute(sql)
-        time = cursor.fetchone()
-        sensorList.append(Slave(address,time,TimeOutHandler))
-except:
-    print("Unable to fetch data")
-
 #---------------------------------------------------------------------------# 
 # choose the client you want
 #---------------------------------------------------------------------------# 
-# make sure to start an implementation to hit against. For this
-# you can use an existing device, the reference implementation in the tools
-# directory, or start a pymodbus server.
-#
-# If you use the UDP or TCP clients, you can override the framer being used
-# to use a custom implementation (say RTU over TCP). By default they use the
-# socket framer::
-#
-#    client = ModbusClient('localhost', port=5020, framer=ModbusRtuFramer)
-#
-# It should be noted that you can supply an ipv4 or an ipv6 host address for
-# both the UDP and TCP clients.
-#
-# There are also other options that can be set on the client that controls
-# how transactions are performed. The current ones are:
-#
-# * retries - Specify how many retries to allow per transaction (default = 3)
-# * retry_on_empty - Is an empty response a retry (default = False)
-# * source_address - Specifies the TCP source address to bind to
-#
-# Here is an example of using these options::
-#
-#    client = ModbusClient('localhost', retries=3, retry_on_empty=True)
-#---------------------------------------------------------------------------# 
-#client = ModbusClient('localhost', port=5020)
-#client = ModbusClient(method='ascii', port='/dev/pts/2', timeout=1)
-serial = configReader.GetSectionMap("SERIAL");
-print(serial['port'])
 
+serial = configReader.GetSectionMap("SERIAL");
 client = ModbusClient(method='rtu', port=serial["port"], timeout=int(serial["timeout"]),
                       baudrate = int(serial["baud"]), bytesize = int(serial["databits"]),
                       stopbits = int(serial["stopbits"]), parity = serial["parity"],
                       rtscts = int(serial["rtscts"]))
-client.connect()
+print("connecting to %s..."%serial['port'])
+if(client.connect()):
+    print("connected")
+else:
+    sys.exit(1)
+#---------------------------------------------------------------------------# 
+# specify slave to query
+#---------------------------------------------------------------------------# 
+def ReadRegisters(client,unit_,address,nrOfReg):
+    log.debug("Read input registers")
+    rr = client.read_input_registers(address, nrOfReg, unit=unit_)
+    assert(rr.function_code < 0x80)     # test that we are not an error
+    print(rr.registers) 
+#---------------------------------------------------------------------------#
+# Initialize slaves according to slaves.txt
+#---------------------------------------------------------------------------#
+from SlaveLoader import SlaveLoader
+sloader = SlaveLoader()
+slaves = sloader.LoadFromFile("slaves.txt")
+for slave in slaves:
+    slave.SetCallback(ReadRegisters,client)
 #---------------------------------------------------------------------------#
 # Run tick forever
 #---------------------------------------------------------------------------#
 import time
-starttime = time.time()
 while True:
-    for sensor in sensorList:
-        sensor.Tick()
-    time.sleep(60.0 - ((time.time() - starttime)%60.0))
-#---------------------------------------------------------------------------# 
-# specify slave to query
-#---------------------------------------------------------------------------# 
-# The slave to query is specified in an optional parameter for each
-# individual request. This can be done by specifying the `unit` parameter
-# which defaults to `0x00`
-#---------------------------------------------------------------------------#
-log.debug("Reading Coils")
-rr = client.read_coils(1, 1, unit=0x01)
-
-#---------------------------------------------------------------------------# 
-# example requests
-#---------------------------------------------------------------------------# 
-# simply call the methods that you would like to use. An example session
-# is displayed below along with some assert checks. Note that some modbus
-# implementations differentiate holding/input discrete/coils and as such
-# you will not be able to write to these, therefore the starting values
-# are not known to these tests. Furthermore, some use the same memory
-# blocks for the two sets, so a change to one is a change to the other.
-# Keep both of these cases in mind when testing as the following will
-# _only_ pass with the supplied async modbus server (script supplied).
-#---------------------------------------------------------------------------#
-log.debug("Write to a Coil and read back")
-rq = client.write_coil(0, True, unit=1)
-rr = client.read_coils(0, 1, unit=1)
-assert(rq.function_code < 0x80)     # test that we are not an error
-assert(rr.bits[0] == True)          # test the expected value
-
-log.debug("Write to multiple coils and read back- test 1")
-rq = client.write_coils(1, [True]*8, unit=1)
-assert(rq.function_code < 0x80)     # test that we are not an error
-rr = client.read_coils(1, 21, unit=1)
-assert(rr.function_code < 0x80)     # test that we are not an error
-resp = [True]*21
-
-# If the returned output quantity is not a multiple of eight,
-# the remaining bits in the final data byte will be padded with zeros
-# (toward the high order end of the byte).
-
-resp.extend([False]*3)
-assert(rr.bits == resp)         # test the expected value
-
-log.debug("Write to multiple coils and read back - test 2")
-rq = client.write_coils(1, [False]*8, unit=1)
-rr = client.read_coils(1, 8, unit=1)
-assert(rq.function_code < 0x80)     # test that we are not an error
-assert(rr.bits == [False]*8)         # test the expected value
-
-
-log.debug("Read discrete inputs")
-rr = client.read_discrete_inputs(0, 8, unit=1)
-assert(rq.function_code < 0x80)     # test that we are not an error
-
-log.debug("Write to a holding register and read back")
-rq = client.write_register(1, 10, unit=1)
-rr = client.read_holding_registers(1, 1, unit=1)
-assert(rq.function_code < 0x80)     # test that we are not an error
-assert(rr.registers[0] == 10)       # test the expected value
-
-log.debug("Write to multiple holding registers and read back")
-rq = client.write_registers(1, [10]*8, unit=1)
-rr = client.read_holding_registers(1, 8, unit=1)
-assert(rq.function_code < 0x80)     # test that we are not an error
-assert(rr.registers == [10]*8)      # test the expected value
-
-log.debug("Read input registers")
-rr = client.read_input_registers(1, 8, unit=1)
-assert(rq.function_code < 0x80)     # test that we are not an error
-
-arguments = {
-    'read_address':    1,
-    'read_count':      8,
-    'write_address':   1,
-    'write_registers': [20]*8,
-}
-log.debug("Read write registeres simulataneously")
-rq = client.readwrite_registers(unit=1, **arguments)
-rr = client.read_holding_registers(1, 8, unit=1)
-assert(rq.function_code < 0x80)     # test that we are not an error
-assert(rq.registers == [20]*8)      # test the expected value
-assert(rr.registers == [20]*8)      # test the expected value
-
+    timeBegin = time.time()
+    for slave in slaves:
+        slave.Tick()
+    timeElapsed = time.time() - timeBegin
+    if(timeElapsed<=1):
+        time.sleep(1-timeElapsed)
 #---------------------------------------------------------------------------# 
 # close the client
 #---------------------------------------------------------------------------# 

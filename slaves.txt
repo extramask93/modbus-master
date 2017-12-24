@@ -1,0 +1,2 @@
+|address|name		|ReadDelaySec
+0x01	|local		|5
