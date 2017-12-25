@@ -17,6 +17,35 @@ from ConfigReader import ConfigReader
 import MySQLdb
 import time
 import sys
+#---------------------------------------------------------------------------#
+# validate login credentials
+#---------------------------------------------------------------------------#
+import getopt
+login = ''
+password = ''
+createUser = None
+try:
+    opts, args = getopt.getopt(argv,"hcl:p:",["login=","password="])
+except getopt.GetoptError:
+    print('modbus.py -l <login> -o <password>')
+    print('modbus.py -c #creates new user interactively')
+    sys.exit(2)
+for opt, arg in opts:
+    if(opt == '-h'):
+        print('modbus.py -l <login> -o <password>')
+        print('modbus.py -c #creates new user interactively')
+        sys.exit()
+    elif(opt == "-c"):
+        createUser = True
+    elif(opt in ("-l","--login")):
+        login = arg
+    elif(opt in ("-p","--password")):
+        password = arg
+if(createUser is not None):
+    CreateUser()
+else:
+    CheckCredentials(login,password)
+
 #---------------------------------------------------------------------------# 
 # configure the client logging
 #---------------------------------------------------------------------------# 

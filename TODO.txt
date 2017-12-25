@@ -1,0 +1,4 @@
+TODO Wtorek:
+- complete api for login and saving data to the server, (MUST)
+- implement login to the server from master application, (MUST)
+- using requests library implement storing data to the server from master application (MUST)
