@@ -15,6 +15,6 @@ class Slave:
         self.timeLeft_=self.timeLeft_-1
         if self.timeLeft_ <= 0:
             self.timeLeft_=self.time_
-            self.callback_(self.client_,self.address_,1000,4)
+            self.callback_(self.client_,self.address_,1000,6)
             
         

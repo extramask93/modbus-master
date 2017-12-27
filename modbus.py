@@ -17,15 +17,21 @@ from ConfigReader import ConfigReader
 import MySQLdb
 import time
 import sys
+from Client import Client
+#---------------------------------------------------------------------------#
+# read config
+#---------------------------------------------------------------------------#
+configReader = ConfigReader("config.ini")
 #---------------------------------------------------------------------------#
 # validate login credentials
 #---------------------------------------------------------------------------#
+
 import getopt
 login = ''
 password = ''
 createUser = None
 try:
-    opts, args = getopt.getopt(argv,"hcl:p:",["login=","password="])
+    opts, args = getopt.getopt(sys.argv,"hcl:p:",["login=","password="])
 except getopt.GetoptError:
     print('modbus.py -l <login> -o <password>')
     print('modbus.py -c #creates new user interactively')
@@ -41,11 +47,14 @@ for opt, arg in opts:
         login = arg
     elif(opt in ("-p","--password")):
         password = arg
+server = configReader.GetSectionMap('SERVER')
+clienthtp = Client(server['ip'],server['port'])
 if(createUser is not None):
-    CreateUser()
+    clienthtp.RegisterUser()
+    sys.exit()
 else:
-    CheckCredentials(login,password)
-
+    if(not clienthtp.LogIn('cloakengage2@gmail.com','admin123')):
+        sys.exit(1)
 #---------------------------------------------------------------------------# 
 # configure the client logging
 #---------------------------------------------------------------------------# 
@@ -53,10 +62,6 @@ import logging
 logging.basicConfig()
 log = logging.getLogger()
 log.setLevel(logging.DEBUG)
-#---------------------------------------------------------------------------#
-# read config
-#---------------------------------------------------------------------------#
-configReader = ConfigReader("config.ini")
 #---------------------------------------------------------------------------# 
 # choose the client you want
 #---------------------------------------------------------------------------# 
@@ -78,7 +83,11 @@ def ReadRegisters(client,unit_,address,nrOfReg):
     log.debug("Read input registers")
     rr = client.read_input_registers(address, nrOfReg, unit=unit_)
     assert(rr.function_code < 0x80)     # test that we are not an error
-    print(rr.registers) 
+    print(rr.registers)
+    data = {'stationID': unit_, 'temperature': (rr.registers[0]/10), 'humidity': (rr.registers[1]/10), 'lux':rr.registers[2], 'soil':rr.registers[3],
+            'co2': rr.registers[4], 'battery': rr.registers[5]}
+    log.debug(data)
+    clienthtp.SendReadings(data)
 #---------------------------------------------------------------------------#
 # Initialize slaves according to slaves.txt
 #---------------------------------------------------------------------------#
