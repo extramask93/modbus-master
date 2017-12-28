@@ -3,10 +3,13 @@ from flask_restful import Resource, Api
 from flask_restful import reqparse
 from flaskext.mysql import MySQL
 from flask import session
+from flask import request
 from functools import wraps
 from flask import jsonify
 import gc
+from MySQLdb import escape_string as thwart
 from passlib.hash import sha256_crypt
+
 mysql = MySQL()
 app = Flask(__name__)
 
@@ -30,155 +33,89 @@ def LoginRequired(f):
         if('logged_in' in session):
             return f(*args, **kwargs)
         else:
-            message = {
-                'status': 511,
-                'message': 'Login required'
-            }
-            resp = jsonify(message)
-            resp.status_code = 511
-            return resp
+            return {'message': 'Login required'},511
     return wrap
 class LogOut(Resource):
     @LoginRequired
     def get(self):
         session.clear()
         gc.collect()
-        return {'status':400, 'message':'Logged Out'}
+        return {'status':200, 'message':'Logged Out'},200
         
 class AuthenticateUser(Resource):
     def post(self):
         try:
-            # Parse the arguments
-            parser = reqparse.RequestParser()
-            parser.add_argument('email', type=str, help='Email address for Authentication')
-            parser.add_argument('password', type=str, help='Password for Authentication')
-            args = parser.parse_args()
-            _userEmail = args['email']
-            _userPassword = args['password']
+            _userEmail = request.form['email']
+            _userPassword = request.form['password']
+        except KeyError as e:
+            return {'message': 'keyError'}, 400
+        try:
             conn = mysql.connect()
             cursor = conn.cursor()
+        except:
+            return {'message': 'No MySQL connection'}, 503
+        try:
             cursor.execute('USE dbUsers')
-            ss = "SELECT * FROM users WHERE Email = '%s'"%(_userEmail,)
-            rowCnt = cursor.execute(ss)
-            log.debug(rowCnt)
-            if(rowCnt>0):
-                data = cursor.fetchall()
-                if(_userPassword == str(data[0][3])):
-                    session['logged_in'] = True
-                    session['username'] = str(data[0][1])
-                    message = {
-                        'status': 200,
-                        'message': 'OK'
-                    }
-                    resp = jsonify(message)
-                    resp.status_code = 200
-                    return resp
-            message = {
-                    'status': 422,
-                    'message': 'Wrong username or password'
-                }
-            resp = jsonify(message)
-            resp.status_code = 422
-            return resp
-        except Exception as e:
-            message = {
-                'status': 422,
-                'message': str(e)
-            }
-            resp = jsonify(message)
-            resp.status_code = 422
-            return resp
+            rowCnt = cursor.execute("SELECT * FROM users WHERE Email = (%s)", (thwart(_userEmail,)))
+        except:
+            return {'message': 'Error during execution of MySQL commands'}, 502
+        if(rowCnt>0):
+            data = cursor.fetchall()
+            if(_userPassword == str(data[0][3])):
+                session['logged_in'] = True
+                session['username'] = str(data[0][1])
+                return {'message':'OK'},200
+            else:
+                return {'message': 'Wrong username or password'},422
 
-
-##class GetAllItems(Resource):
-##    def post(self):
-##        try: 
-##            # Parse the arguments
-##            parser = reqparse.RequestParser()
-##            parser.add_argument('id', type=str)
-##            args = parser.parse_args()
-##
-##            _userId = args['id']
-##
-##            conn = mysql.connect()
-##            cursor = conn.cursor()
-##            cursor.callproc('sp_GetAllItems',(_userId,))
-##            data = cursor.fetchall()
-##
-##            items_list=[];
-##            for item in data:
-##                i = {
-##                    'Id':item[0],
-##                    'Item':item[1]
-##                }
-##                items_list.append(i)
-##
-##            return {'StatusCode':'200','Items':items_list}
-##
-##        except Exception as e:
-##            return {'error': str(e)}
-##
 class AddItem(Resource):
+    @LoginRequired
     def post(self):
         try:
-            #if( not Authorized()):
-             #   return {'StatusCode':422, 'message':'Authorization failure'}
-            # Parse the arguments
-            parser = reqparse.RequestParser()
-            parser.add_argument('stationID', type=int, required=True)
-            parser.add_argument('temperature', type=str, required = True)
-            parser.add_argument('humidity', type=str, required = True)
-            parser.add_argument('lux', type=int, required = True)
-            parser.add_argument('soil', type=str, required = True)
-            parser.add_argument('co2', type=int, required = True)
-            parser.add_argument('battery', type=int, required = True)
-            args = parser.parse_args()
-            
-            _stationID = int(args['stationID'])
-            _temperature = float(args['temperature'])
-            _humidity = float(args['humidity'])
-            _lux = int(args['lux'])
-            _soil = int(args['soil'])
-            _co2 = int(args['co2'])
-            _battery = int(args['battery'])
-            log.debug('%s, %s, %s, %s, %s, %s, %s'%(_stationID,_temperature,_humidity,_lux,_soil,_co2,_battery))
+            _stationID = str(request.form['stationID'])
+            _temperature = str(request.form['temperature'])
+            _humidity = str(request.form['humidity'])
+            _lux = str(request.form['lux'])
+            _soil = str(request.form['soil'])
+            _co2 = str(request.form['co2'])
+            _battery = str(request.form['battery'])
+        except KeyError as e:
+            return {'message':'keyError'},400
+        try:
             conn = mysql.connect()
             cursor = conn.cursor()
-            cursor.execute('USE environment')
-            #cursor.execute("INSERT INTO stations (StationID, Name) values (%s,'%s')"%(_stationID,"No name"))
-            cursor.execute('INSERT INTO measurements (StationID,temperature,humidity,lux,soil,co2,battery) VALUES (%s, %s, %s, %s, %s, %s, %s)'%(_stationID,_temperature,_humidity,_lux,_soil,_co2,_battery))
+        except:
+            return {'message':'No MySQL connection'},503
+        try:
+            cursor.execute("USE %s"%(session['username'],))
+            cursor.execute("INSERT INTO measurements (StationID,temperature,humidity,lux,soil,co2,battery) VALUES ((%s), (%s), (%s), (%s), (%s), (%s), (%s))",(thwart(_stationID),thwart(_temperature),thwart(_humidity),thwart(_lux),thwart(_soil),thwart(_co2),thwart(_battery)))
             conn.commit()
-            return {'StatusCode':'200','Message': 'Success'}
-
-        except Exception as e:
-            log.debug('exception!!')
-            log.debug(e)
-            return {'error': str(e)}
+        except:
+            return {'message': 'Error during execution of MySQL commands'},502
+        return {'StatusCode':'200','Message': 'Success'}
         
 class CreateUser(Resource):
     def post(self):
         try:
-            # Parse the arguments
-            parser = reqparse.RequestParser()
-            parser.add_argument('userName', type = str, help='username')
-            parser.add_argument('email', type=str, help='Email address to create user')
-            parser.add_argument('password', type=str, help='Password to create user')
-            parser.add_argument('phone', type = str, help = 'User phone number')
-            args = parser.parse_args()
-            _userEmail = args['email']
-            _userPassword = (args['password'])
-            _userName = args['userName']
-            _userPhone = args['phone']
-
+            _userEmail = request.form['email']
+            _userPassword = request.form['password']
+            _userName = request.form['userName']
+            _userPhone = request.form['phone']
+        except KeyError as e:
+            return {'message': 'keyError'}, 400
+        try:
             conn = mysql.connect()
             cursor = conn.cursor()
+        except:
+            return {'message': 'No MySQL connection'}, 503
+        try:
             cursor.execute('USE dbUsers')
-            cursor.execute("SELECT EXISTS (SELECT 1 FROM users WHERE Email = '%s')"%(_userEmail,))
+            cursor.execute("SELECT EXISTS (SELECT 1 FROM users WHERE Email = (%s))",(thwart(_userEmail)))
             data = cursor.fetchall()
             if(data[0][0] == 1):
                 return {'StatusCode':422, 'Message': 'Email already taken'}
             else:
-                cursor.execute("INSERT INTO users (UserName,Email,Password,Phone) values ('%s', '%s', '%s' ,'%s')"%(_userName,_userEmail,_userPassword,_userPhone))
+                cursor.execute("INSERT INTO users (UserName,Email,Password,Phone) values ((%s), (%s), (%s) ,(%s))", (thwart(_userName),thwart(_userEmail),thwart(_userPassword),thwart(_userPhone)))
                 cursor.execute("CREATE DATABASE %s"%(_userName,))
                 cursor.execute("USE %s"%(_userName,))
                 cursor.execute("CREATE TABLE stations (StationID INT NOT NULL, Name varchar(45), PRIMARY KEY(StationID))")
@@ -186,43 +123,51 @@ class CreateUser(Resource):
                 conn.commit()
                 return {'StatusCode': 200, 'Message': 'Done'}
         except Exception as e:
-            return {'error': str(e)}
+            return{'message': 'Error during execution of MySQL commands'}, 502
 class CheckEmail(Resource):
     def post(self):
         try:
-            parser = reqparse.RequestParser()
-            parser.add_argument('email', type = str, help = 'Email address to check')
-            args = parser.parse_args()
-            userEmail = args['email']
-            conn = mysql.connect()
-            cursor = conn.cursor()
-            cursor.execute('USE dbUsers')
-            cursor.execute("SELECT EXISTS (SELECT 1 FROM users WHERE Email = '%s')"%(userEmail,))
-            data = cursor.fetchall()
-            if(data[0][0] == 1):
-                return {'StatusCode':422, 'Message': 'Email already taken'}
-            else:
-                return {'StatusCode': 200, 'Message': 'Email available'}
-        except Exception as e:
-            log.debug(e)
-        return {'StatusCode': 404, 'Message': str(e)}
-class GetDaily(Resource):
-    @LoginRequired
-    def post(self):
+            userEmail = request.form['email']
+        except KeyError as e:
+            return {'message': 'keyError'}, 400
         try:
-            parser = reqparse.RequestParser()
-            parser.add_argument('date', type=str, help='Date that we are insterested in')
-            parser.add_argument('stationID', type=int, help ='From what station to extract data')
-            args = parser.parse_args()
-            date = args['date']
-            station = args['stationID']
             conn = mysql.connect()
             cursor = conn.cursor()
-            dateb = date+' 00:00:00'
-            datee = date+' 23:59:59'
-            cursor.execute('USE %s'%(session['username'],))
-            cursor.execute("SELECT * from measurements WHERE measurementDate BETWEEN '%s' AND '%s' AND StationID = '%s'"%(dateb,datee,station))
-            rows = cursor.fetchall()
+        except:
+            return {'message': 'No MySQL connection'}, 503
+        try:
+            cursor.execute('USE dbUsers')
+            cursor.execute("SELECT EXISTS (SELECT 1 FROM users WHERE Email = (%s))", (thwart(userEmail)))
+            data = cursor.fetchall()
+        except:
+            return {'message': 'Error during execution of MySQL commands'}, 502
+        if(data[0][0] == 1):
+            return {'StatusCode':422, 'Message': 'Email already taken'}
+        else:
+            return {'StatusCode': 200, 'Message': 'Email available'}
+class GetDaily(Resource):
+    #@LoginRequired
+    def get(self):
+        try:
+            dateStart = request.args.get('date1', default=None, type = str)
+            dateEnd = request.args.get('date2', default=None, type=str)
+            station = request.args.get('station',default='1', type=str)
+            if(dateStart is None):
+                return {'message':'Start date not specified'},404
+            try:
+                conn = mysql.connect()
+                cursor = conn.cursor()
+            except:
+                return {'message': 'No MySQL connection'}, 503
+            try:
+                cursor.execute('USE %s' % (session['username'],))
+                if(dateEnd is None):
+                    cursor.execute("SELECT * from measurements WHERE measurementDate >= (%s) AND StationID = (%s)" , (thwart(dateStart),thwart(station)))
+                else:
+                    cursor.execute("SELECT * from measurements WHERE measurementDate BETWEEN (%s) AND (%s) AND StationID = (%s)", (thwart(dateStart), thwart(dateEnd), thwart(station)))
+                rows = cursor.fetchall()
+            except:
+                return {'message': 'Error during execution of MySQL commands'}, 502
             a = []
             for row in rows:
                 message={}
@@ -235,13 +180,14 @@ class GetDaily(Resource):
                 message['battery'] = str(row[6])
                 message['measurementDate'] = str(row[7])
                 a.append(message)
-            resp = jsonify({'measurements':a})
+            resp = jsonify({'measurements': a})
             resp.status_code = 200
             return resp
         except Exception as e:
-            return {'error':str(e)}
+            return {'error',str(e)},404
+
 api.add_resource(CreateUser, '/CreateUser')
-api.add_resource(AuthenticateUser, '/AuthenticateUser')
+api.add_resource(AuthenticateUser, '/LogIn')
 api.add_resource(LogOut,'/LogOut')
 api.add_resource(AddItem, '/AddItem')
 api.add_resource(CheckEmail,'/CheckEmail')
