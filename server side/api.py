@@ -67,6 +67,7 @@ class AuthenticateUser(Resource):
                 return {'message':'OK'},200
             else:
                 return {'message': 'Wrong username or password'},422
+        return {'message':'No username found'},422
 
 class AddItem(Resource):
     @LoginRequired
@@ -152,6 +153,8 @@ class GetDaily(Resource):
             dateStart = request.args.get('date1', default=None, type = str)
             dateEnd = request.args.get('date2', default=None, type=str)
             station = request.args.get('station',default='1', type=str)
+            #measurement = request.args.get('m', default = 'temperature', type=str)
+            session['username'] = 'environment'
             if(dateStart is None):
                 return {'message':'Start date not specified'},404
             try:
@@ -176,11 +179,38 @@ class GetDaily(Resource):
                 message['humidity'] = str(row[2])
                 message['lux'] = str(row[3])
                 message['soil'] = str(row[4])
-                message['so2'] = str(row[5])
+                message['co2'] = str(row[5])
                 message['battery'] = str(row[6])
                 message['measurementDate'] = str(row[7])
                 a.append(message)
             resp = jsonify({'measurements': a})
+            resp.status_code = 200
+            return resp
+        except Exception as e:
+            return {'error',str(e)},404
+class GetStations(Resource):
+    #@LoginRequired
+    def get(self):
+        try:
+            try:
+                conn = mysql.connect()
+                cursor = conn.cursor()
+            except:
+                return {'message': 'No MySQL connection'}, 503
+            try:
+                cursor.execute("USE environment")
+                #cursor.execute('USE %s' % (session['username'],))
+                cursor.execute("SELECT * from stations")
+                rows = cursor.fetchall()
+            except:
+                return {'message': 'Error during execution of MySQL commands'}, 502
+            a = []
+            for row in rows:
+                message={}
+                message['StationID']=str(row[0])
+                message['Name']=str(row[1])
+                a.append(message)
+            resp = jsonify({'stations': a})
             resp.status_code = 200
             return resp
         except Exception as e:
@@ -192,6 +222,6 @@ api.add_resource(LogOut,'/LogOut')
 api.add_resource(AddItem, '/AddItem')
 api.add_resource(CheckEmail,'/CheckEmail')
 api.add_resource(GetDaily, '/GetDaily')
-
+api.add_resource(GetStations, '/GetStations')
 if __name__ == '__main__':
     app.run(debug=True)

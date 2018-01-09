@@ -11,7 +11,7 @@ class Client:
         if(self.isLoggedIn):
             return True
         print("Trying to log in as {0}...".format(email))
-        url = "http://{0}:{1}/AuthenticateUser".format(self.ip, self.port)
+        url = "http://{0}:{1}/LogIn".format(self.ip, self.port)
         try:
             r = requests.post(url, data={'email': email, 'password': password})
             response = json.loads(r.text)

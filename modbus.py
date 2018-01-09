@@ -81,7 +81,7 @@ else:
 #---------------------------------------------------------------------------# 
 def ReadRegisters(client,unit_,address,nrOfReg):
     log.debug("Read input registers")
-    rr = client.read_input_registers(address, nrOfReg, unit=unit_)
+    rr = client.read_input_registers(address, nrOfReg, unit=0xFF)
     assert(rr.function_code < 0x80)     # test that we are not an error
     print(rr.registers)
     data = {'stationID': unit_, 'temperature': (rr.registers[0]/10), 'humidity': (rr.registers[1]/10), 'lux':rr.registers[2], 'soil':rr.registers[3],
