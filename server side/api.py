@@ -188,6 +188,49 @@ class GetDaily(Resource):
             return resp
         except Exception as e:
             return {'error',str(e)},404
+class GetPeriodical(Resource):
+    #@LoginRequired
+    def get(self):
+        try:
+            period = request.args.get('period', default='week', type = str)
+            type = request.args.get('type', default='temperature', type=str)
+            station = request.args.get('station',default='1', type=str)
+            nrOfintervals = request.args.get('interval', default = '100', type=str)
+            session['username'] = 'environment'
+            intervals = int(nrOfintervals)
+            try:
+                conn = mysql.connect()
+                cursor = conn.cursor()
+            except:
+                return {'message': 'No MySQL connection'}, 503
+            try:
+                cursor.execute('USE %s' % (session['username'],))
+                dict = {'day':1,'week':7,'3days':3,'month':31,'3months':93,'year':365 }
+                az = "select StationID,avg({0}) as {0}, convert(min(measurementDate),datetime) as time from measurements where measurementDate between date_sub(now(), interval {1} day) and now() and StationID={2} group by measurementDate div (select ((unix_timestamp() - unix_timestamp())+ ({1} * 864000)) div {3} as tmp),StationID".format(type,dict[period],station,nrOfintervals)
+                ay="select count(StationID) from measurements where measurementDate between date_sub(now(), interval {0} day) and now() and StationID = {1}".format(dict[period],station)
+                cursor.execute(ay)
+                nr = cursor.fetchone()
+                log.debug(nr[0])
+                if(int(nr[0]) <= int(nrOfintervals)):
+                    cursor.execute("select StationID,{0},measurementDate from measurements where measurementDate between date_sub(now(), interval {1} day) and now() and StationID = {2}".format(type,dict[period],station))
+                else:
+                    cursor.execute(az)
+            except:
+                return {'message': 'error'}, 502
+            rows = cursor.fetchall()
+            a = []
+            for row in rows:
+                message={}
+                message['StationID']=str(row[0])
+                message[type]=str(row[1])
+                message['time'] = str(row[2])
+                a.append(message)
+            resp = jsonify({'measurements': a})
+            resp.status_code = 200
+            return resp
+        except Exception as e:
+            return {'error',str(e)},404
+
 class GetStations(Resource):
     #@LoginRequired
     def get(self):
@@ -223,5 +266,6 @@ api.add_resource(AddItem, '/AddItem')
 api.add_resource(CheckEmail,'/CheckEmail')
 api.add_resource(GetDaily, '/GetDaily')
 api.add_resource(GetStations, '/GetStations')
+api.add_resource(GetPeriodical,'/GetPeriodical')
 if __name__ == '__main__':
     app.run(debug=True)
