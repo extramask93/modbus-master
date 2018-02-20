@@ -49,12 +49,12 @@ for opt, arg in opts:
         password = arg
 server = configReader.GetSectionMap('SERVER')
 clienthtp = Client(server['ip'],server['port'])
-if(createUser is not None):
-    clienthtp.RegisterUser()
-    sys.exit()
-else:
-    if(not clienthtp.LogIn('cloakengage2@gmail.com','admin123')):
-        sys.exit(1)
+# if(createUser is not None):
+#     clienthtp.RegisterUser()
+#     sys.exit()
+# else:
+#     if(not clienthtp.LogIn('cloakengage2@gmail.com','admin123')):
+#         sys.exit(1)
 #---------------------------------------------------------------------------# 
 # configure the client logging
 #---------------------------------------------------------------------------# 
@@ -81,13 +81,19 @@ else:
 #---------------------------------------------------------------------------# 
 def ReadRegisters(client,unit_,address,nrOfReg):
     log.debug("Read input registers")
-    rr = client.read_input_registers(address, nrOfReg, unit=0xFF)
+    #rr= client.write_register(0,20, unit=0x01)
+    #rr = client.read_holding_registers(0, 1, unit=0x01)
+    #rr = client.write_coils(1999, [True,True,True,True,True],unit=0x01)
+    #time.sleep(4)
+    bb = client.read_coils(1999,1,unit=0x01)
+    print(bb.bits)
+    rr = client.read_input_registers(address, nrOfReg, unit=0x01)
     if(rr.function_code >= 0x80):   # test that we are not an error
         print('Invalid response from:'+str(address)+'. Error code: '+hex(rr.function_code))
         return
     print(rr.registers)
     data = {'stationID': unit_, 'temperature': (rr.registers[0]/10), 'humidity': (rr.registers[1]/10), 'lux':rr.registers[2], 'soil':rr.registers[3],
-            'co2': rr.registers[4], 'battery': rr.registers[5]}
+            'battery': rr.registers[4], 'co2': rr.registers[5]}
     log.debug(data)
     clienthtp.SendReadings(data)
 #---------------------------------------------------------------------------#
