@@ -1,8 +1,19 @@
 import json
 import requests
-
-class Client:
+class DummyClient():
+    def __init__(self):
+        pass
+    def LogIn(self,email,password):
+        return True
+    def LogOut(self):
+        pass
+    def SendReadings(self, readings):
+        return True
+    def RegisterUser(self):
+        pass
+class Client(DummyClient):
     def __init__(self,ip,port):
+        super().__init__(self)
         self.ip = ip
         self.port = port
         self.isLoggedIn = False
