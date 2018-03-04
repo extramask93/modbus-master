@@ -17,7 +17,7 @@ from ConfigReader import ConfigReader
 import MySQLdb
 import time
 import sys
-from Client import Client
+from Client import Client, DummyClient
 #---------------------------------------------------------------------------#
 # read config
 #---------------------------------------------------------------------------#
@@ -30,6 +30,7 @@ import getopt
 login = ''
 password = ''
 createUser = None
+offline = True
 try:
     opts, args = getopt.getopt(sys.argv,"hcl:p:",["login=","password="])
 except getopt.GetoptError:
@@ -38,23 +39,29 @@ except getopt.GetoptError:
     sys.exit(2)
 for opt, arg in opts:
     if(opt == '-h'):
+        print('modbus.py #runs in offline mode')
         print('modbus.py -l <login> -o <password>')
         print('modbus.py -c #creates new user interactively')
         sys.exit()
     elif(opt == "-c"):
+        offline = False
         createUser = True
     elif(opt in ("-l","--login")):
+        offline= False
         login = arg
     elif(opt in ("-p","--password")):
+        offline = False
         password = arg
 server = configReader.GetSectionMap('SERVER')
-clienthtp = Client(server['ip'],server['port'])
-# if(createUser is not None):
-#     clienthtp.RegisterUser()
-#     sys.exit()
-# else:
-#     if(not clienthtp.LogIn('cloakengage2@gmail.com','admin123')):
-#         sys.exit(1)
+clienthtp = DummyClient(server['ip'],server['port'])
+if(not offline):
+    clienthtp = Client(server['ip'],server['port'])
+if(createUser is not None):
+    clienthtp.RegisterUser()
+    sys.exit()
+else:
+    if(not clienthtp.LogIn(login,password)):
+        sys.exit(1)
 #---------------------------------------------------------------------------# 
 # configure the client logging
 #---------------------------------------------------------------------------# 
@@ -75,6 +82,7 @@ print("connecting to %s..."%serial['port'])
 if(client.connect()):
     print("connected")
 else:
+    print("Unable to establish connection via {0}", serial["port"])
     sys.exit(1)
 #---------------------------------------------------------------------------# 
 # specify slave to query
@@ -86,16 +94,26 @@ def ReadRegisters(client,unit_,address,nrOfReg):
     #rr = client.write_coils(1999, [True,True,True,True,True],unit=0x01)
     #time.sleep(4)
     bb = client.read_coils(1999,1,unit=0x01)
-    print(bb.bits)
+    if(bb is None):
+        print("Read timed out for slave nr {0}",unit_)
+        return
     rr = client.read_input_registers(address, nrOfReg, unit=0x01)
+    if(rr is None):
+        print("Read timed out for slave nr {0}",unit_)
+        return
     if(rr.function_code >= 0x80):   # test that we are not an error
         print('Invalid response from:'+str(address)+'. Error code: '+hex(rr.function_code))
         return
     print(rr.registers)
-    data = {'stationID': unit_, 'temperature': (rr.registers[0]/10), 'humidity': (rr.registers[1]/10), 'lux':rr.registers[2], 'soil':rr.registers[3],
-            'battery': rr.registers[4], 'co2': rr.registers[5]}
-    log.debug(data)
-    clienthtp.SendReadings(data)
+    try:
+        data = {'stationID': unit_, 'temperature': (rr.registers[0]/10), 'humidity': (rr.registers[1]/10), 'lux':rr.registers[2], 'soil':rr.registers[3],
+                'battery': rr.registers[4], 'co2': rr.registers[5]}
+    except Exception as e:
+        print("Response was broken")
+        return
+    finally:
+        log.debug(data)
+        clienthtp.SendReadings(data)
 #---------------------------------------------------------------------------#
 # Initialize slaves according to slaves.txt
 #---------------------------------------------------------------------------#
