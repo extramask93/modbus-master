@@ -147,7 +147,7 @@ class CheckEmail(Resource):
         else:
             return {'StatusCode': 200, 'Message': 'Email available'}
 class GetDaily(Resource):
-    #@LoginRequired
+    @LoginRequired
     def get(self):
         try:
             dateStart = request.args.get('date1', default=None, type = str)
@@ -189,7 +189,7 @@ class GetDaily(Resource):
         except Exception as e:
             return {'error',str(e)},404
 class GetPeriodical(Resource):
-    #@LoginRequired
+    @LoginRequired
     def get(self):
         try:
             period = request.args.get('period', default='week', type = str)
@@ -232,7 +232,7 @@ class GetPeriodical(Resource):
             return {'error',str(e)},404
 
 class GetStations(Resource):
-    #@LoginRequired
+    @LoginRequired
     def get(self):
         try:
             try:
@@ -241,8 +241,7 @@ class GetStations(Resource):
             except:
                 return {'message': 'No MySQL connection'}, 503
             try:
-                cursor.execute("USE environment")
-                #cursor.execute('USE %s' % (session['username'],))
+                cursor.execute('USE %s' % (session['username'],))
                 cursor.execute("SELECT * from stations")
                 rows = cursor.fetchall()
             except:
@@ -252,13 +251,81 @@ class GetStations(Resource):
                 message={}
                 message['StationID']=str(row[0])
                 message['Name']=str(row[1])
+                message['refTime'] = str(row[2])
+                message['enableSettings'] = str(row[3])+str(row[4])+str(row[5])+str(row[6])+str(row[7])+str(row[8])
                 a.append(message)
             resp = jsonify({'stations': a})
             resp.status_code = 200
             return resp
         except Exception as e:
             return {'error',str(e)},404
+class ModStation(Resource):
+    @LoginRequired
+    def post(self):
+        try:
+            _stationID = request.form['StationID']
+            _stationName = request.form['Name']
+            _stationrefTime = request.form['refTime']
+            _stationSettings = request.form['settings']
+        except KeyError as e:
+            return {'message': 'keyError'}, 400
+        try:
+            conn = mysql.connect()
+            cursor = conn.cursor()
+        except:
+            return {'message': 'No MySQL connection'}, 503
+        try:
+            cursor.execute('USE %s' % (session['username'],))
+            rowCnt = cursor.execute("SELECT * FROM stations WHERE StationID = (%s)", (thwart(_stationID,)))
+        except:
+            return {'message': 'Error during execution of MySQL commands'}, 502
+        if(rowCnt>0):
+            cursor.execute("UPDATE stations SET StationID=(%s), Name=(%s), refTime=(%s), temperature=(%s), humidity=(%s), lux=(%s), soil=(%s), battery=(%s), co2=(%s) WHERE StationID=(%s)", (thwart(_stationID, _stationName, _stationrefTime, _stationSettings[0],_stationSettings[1],_stationSettings[2],_stationSettings[3],_stationSettings[4],_stationSettings[5])))
+            return {'message': 'OK'}, 200
+        return {'message':'Station does not exist'},422
 
+class AddStation(Resource):
+    @LoginRequired
+    def post(self):
+        try:
+            _stationID = request.form['StationID']
+            _stationName = request.form['Name']
+            _stationrefTime = request.form['refTime']
+            _stationSettings = request.form['settings']
+        except KeyError as e:
+            return {'message': 'keyError'}, 400
+        try:
+            conn = mysql.connect()
+            cursor = conn.cursor()
+        except:
+            return {'message': 'No MySQL connection'}, 503
+        try:
+            cursor.execute('USE %s' % (session['username'],))
+            rowCnt = cursor.execute("SELECT * FROM stations WHERE StationID = (%s)", (thwart(_stationID,)))
+        except:
+            return {'message': 'Error during execution of MySQL commands'}, 502
+        if(rowCnt==0):
+            cursor.execute("INSERT INTO stations (StationID, Name, refTime, temperature, humidity, lux, soil, battery, co2) values ((%s),(%s),(%s),(%s),(%s),(%s),(%s),(%s),(%s))", (thwart(_stationID, _stationName, _stationrefTime, _stationSettings[0],_stationSettings[1],_stationSettings[2],_stationSettings[3],_stationSettings[4],_stationSettings[5])))
+            return {'message': 'OK'}, 200
+        return {'message':'Station already exist'},422
+class RemoveStation(Resource):
+    @LoginRequired
+    def post(self):
+        try:
+            _stationID = request.form['StationID']
+        except KeyError as e:
+            return {'message': 'keyError'}, 400
+        try:
+            conn = mysql.connect()
+            cursor = conn.cursor()
+        except:
+            return {'message': 'No MySQL connection'}, 503
+        try:
+            cursor.execute('USE %s' % (session['username'],))
+            rowCnt = cursor.execute("DELETE FROM stations WHERE StationID = (%s)", (thwart(_stationID,)))
+            return {'message': 'OK'}, 200
+        except:
+            return {'message': 'Error during execution of MySQL commands'}, 502
 api.add_resource(CreateUser, '/CreateUser')
 api.add_resource(AuthenticateUser, '/LogIn')
 api.add_resource(LogOut,'/LogOut')
@@ -267,5 +334,7 @@ api.add_resource(CheckEmail,'/CheckEmail')
 api.add_resource(GetDaily, '/GetDaily')
 api.add_resource(GetStations, '/GetStations')
 api.add_resource(GetPeriodical,'/GetPeriodical')
+api.add_resource(ModStation, '/ModStation')
+api.add_resource(AddStation, '/AddStation')
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=True, host = '0.0.0.0')
