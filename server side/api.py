@@ -242,7 +242,7 @@ class GetStations(Resource):
                 return {'message': 'No MySQL connection'}, 503
             try:
                 cursor.execute('USE %s' % (session['username'],))
-                cursor.execute("SELECT * from stations")
+                cursor.execute("select StationID,Name,DATE_FORMAT(refTime,'%T') as refTime,temperature,humidity,lux,soil,battery,co2 from stations")
                 rows = cursor.fetchall()
             except:
                 return {'message': 'Error during execution of MySQL commands'}, 502
@@ -268,7 +268,7 @@ class ModStation(Resource):
             _stationrefTime = request.form['refTime']
             _stationSettings = request.form['settings']
         except KeyError as e:
-            return {'message': 'keyError'}, 400
+            return {'message': 'There are missing arguments in the request.'}, 400
         try:
             conn = mysql.connect()
             cursor = conn.cursor()
@@ -280,7 +280,11 @@ class ModStation(Resource):
         except:
             return {'message': 'Error during execution of MySQL commands'}, 502
         if(rowCnt>0):
-            cursor.execute("UPDATE stations SET StationID=(%s), Name=(%s), refTime=(%s), temperature=(%s), humidity=(%s), lux=(%s), soil=(%s), battery=(%s), co2=(%s) WHERE StationID=(%s)", (thwart(_stationID, _stationName, _stationrefTime, _stationSettings[0],_stationSettings[1],_stationSettings[2],_stationSettings[3],_stationSettings[4],_stationSettings[5])))
+            cursor.execute("UPDATE stations SET Name=(%s), refTime=(%s), temperature=(%s), humidity=(%s), lux=(%s), soil=(%s), battery=(%s), co2=(%s) WHERE StationID=(%s)",
+                           (thwart(_stationName), thwart(_stationrefTime),
+                            thwart(_stationSettings[0]), thwart(_stationSettings[1]),
+                            thwart(_stationSettings[2]), thwart(_stationSettings[3]), thwart(_stationSettings[4])
+                            , thwart(_stationSettings[5]), thwart(_stationID)))
             return {'message': 'OK'}, 200
         return {'message':'Station does not exist'},422
 
@@ -293,7 +297,7 @@ class AddStation(Resource):
             _stationrefTime = request.form['refTime']
             _stationSettings = request.form['settings']
         except KeyError as e:
-            return {'message': 'keyError'}, 400
+            return {'message': 'There are missing arguments in the request.'}, 400
         try:
             conn = mysql.connect()
             cursor = conn.cursor()
@@ -305,7 +309,10 @@ class AddStation(Resource):
         except:
             return {'message': 'Error during execution of MySQL commands'}, 502
         if(rowCnt==0):
-            cursor.execute("INSERT INTO stations (StationID, Name, refTime, temperature, humidity, lux, soil, battery, co2) values ((%s),(%s),(%s),(%s),(%s),(%s),(%s),(%s),(%s))", (thwart(_stationID, _stationName, _stationrefTime, _stationSettings[0],_stationSettings[1],_stationSettings[2],_stationSettings[3],_stationSettings[4],_stationSettings[5])))
+            cursor.execute("INSERT INTO stations (StationID, Name, refTime, temperature, humidity, lux, soil, battery, co2) values ((%s),(%s),(%s),(%s),(%s),(%s),(%s),(%s),(%s))",
+                           (thwart(_stationID), thwart(_stationName),thwart(_stationrefTime),thwart(_stationSettings[0]),thwart(_stationSettings[1]),
+                            thwart(_stationSettings[2]),thwart(_stationSettings[3]),thwart(_stationSettings[4])
+                            ,thwart(_stationSettings[5])))
             return {'message': 'OK'}, 200
         return {'message':'Station already exist'},422
 class RemoveStation(Resource):
@@ -336,5 +343,6 @@ api.add_resource(GetStations, '/GetStations')
 api.add_resource(GetPeriodical,'/GetPeriodical')
 api.add_resource(ModStation, '/ModStation')
 api.add_resource(AddStation, '/AddStation')
+api.add_resource(RemoveStation, '/RemoveStation')
 if __name__ == '__main__':
     app.run(debug=True, host = '0.0.0.0')
