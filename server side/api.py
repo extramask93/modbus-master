@@ -1,14 +1,12 @@
 from flask import Flask
 from flask_restful import Resource, Api
-from flask_restful import reqparse
 from flaskext.mysql import MySQL
 from flask import session
 from flask import request
 from functools import wraps
 from flask import jsonify
+import mysql.connector
 import gc
-from MySQLdb import escape_string as thwart
-from passlib.hash import sha256_crypt
 
 mysql = MySQL()
 app = Flask(__name__)
@@ -33,7 +31,7 @@ def LoginRequired(f):
         if('logged_in' in session):
             return f(*args, **kwargs)
         else:
-            return {'message': 'Login required'},511
+            return {'message': 'Please log in'},511
     return wrap
 class LogOut(Resource):
     @LoginRequired
@@ -48,17 +46,17 @@ class AuthenticateUser(Resource):
             _userEmail = request.form['email']
             _userPassword = request.form['password']
         except KeyError as e:
-            return {'message': 'keyError'}, 400
+            return {'message': 'There are missing arguments in the request.'}, 400
         try:
             conn = mysql.connect()
             cursor = conn.cursor()
         except:
-            return {'message': 'No MySQL connection'}, 503
+            return {'message': 'Can\'t connect to the database'}, 503
         try:
             cursor.execute('USE dbUsers')
-            rowCnt = cursor.execute("SELECT * FROM users WHERE Email = (%s)", (thwart(_userEmail,)))
+            rowCnt = cursor.execute("SELECT * FROM users WHERE Email = (%s)", (_userEmail,))
         except:
-            return {'message': 'Error during execution of MySQL commands'}, 502
+            return {'message': 'Query Error'}, 502
         if(rowCnt>0):
             data = cursor.fetchall()
             if(_userPassword == str(data[0][3])):
@@ -89,7 +87,7 @@ class AddItem(Resource):
             return {'message':'No MySQL connection'},503
         try:
             cursor.execute("USE %s"%(session['username'],))
-            cursor.execute("INSERT INTO measurements (StationID,temperature,humidity,lux,soil,co2,battery) VALUES ((%s), (%s), (%s), (%s), (%s), (%s), (%s))",(thwart(_stationID),thwart(_temperature),thwart(_humidity),thwart(_lux),thwart(_soil),thwart(_co2),thwart(_battery)))
+            cursor.execute("INSERT INTO measurements (StationID,temperature,humidity,lux,soil,co2,battery) VALUES ((%s), (%s), (%s), (%s), (%s), (%s), (%s))",(_stationID,_temperature,_humidity,_lux,_soil,_co2,_battery))
             conn.commit()
         except:
             return {'message': 'Error during execution of MySQL commands'},502
@@ -111,12 +109,12 @@ class CreateUser(Resource):
             return {'message': 'No MySQL connection'}, 503
         try:
             cursor.execute('USE dbUsers')
-            cursor.execute("SELECT EXISTS (SELECT 1 FROM users WHERE Email = (%s))",(thwart(_userEmail)))
+            cursor.execute("SELECT EXISTS (SELECT 1 FROM users WHERE Email = (%s))",(_userEmail))
             data = cursor.fetchall()
             if(data[0][0] == 1):
                 return {'StatusCode':422, 'Message': 'Email already taken'}
             else:
-                cursor.execute("INSERT INTO users (UserName,Email,Password,Phone) values ((%s), (%s), (%s) ,(%s))", (thwart(_userName),thwart(_userEmail),thwart(_userPassword),thwart(_userPhone)))
+                cursor.execute("INSERT INTO users (UserName,Email,Password,Phone) values ((%s), (%s), (%s) ,(%s))", (_userName,_userEmail,_userPassword,_userPhone))
                 cursor.execute("CREATE DATABASE %s"%(_userName,))
                 cursor.execute("USE %s"%(_userName,))
                 cursor.execute("CREATE TABLE stations (StationID INT NOT NULL, Name varchar(45), PRIMARY KEY(StationID))")
@@ -138,7 +136,7 @@ class CheckEmail(Resource):
             return {'message': 'No MySQL connection'}, 503
         try:
             cursor.execute('USE dbUsers')
-            cursor.execute("SELECT EXISTS (SELECT 1 FROM users WHERE Email = (%s))", (thwart(userEmail)))
+            cursor.execute("SELECT EXISTS (SELECT 1 FROM users WHERE Email = (%s))", (userEmail))
             data = cursor.fetchall()
         except:
             return {'message': 'Error during execution of MySQL commands'}, 502
@@ -165,9 +163,9 @@ class GetDaily(Resource):
             try:
                 cursor.execute('USE %s' % (session['username'],))
                 if(dateEnd is None):
-                    cursor.execute("SELECT * from measurements WHERE measurementDate >= (%s) AND StationID = (%s)" , (thwart(dateStart),thwart(station)))
+                    cursor.execute("SELECT * from measurements WHERE measurementDate >= (%s) AND StationID = (%s)" , (dateStart,station))
                 else:
-                    cursor.execute("SELECT * from measurements WHERE measurementDate BETWEEN (%s) AND (%s) AND StationID = (%s)", (thwart(dateStart), thwart(dateEnd), thwart(station)))
+                    cursor.execute("SELECT * from measurements WHERE measurementDate BETWEEN (%s) AND (%s) AND StationID = (%s)", (dateStart, dateEnd, station))
                 rows = cursor.fetchall()
             except:
                 return {'message': 'Error during execution of MySQL commands'}, 502
@@ -276,15 +274,15 @@ class ModStation(Resource):
             return {'message': 'No MySQL connection'}, 503
         try:
             cursor.execute('USE %s' % (session['username'],))
-            rowCnt = cursor.execute("SELECT * FROM stations WHERE StationID = (%s)", (thwart(_stationID,)))
+            rowCnt = cursor.execute("SELECT * FROM stations WHERE StationID = (%s)", (_stationID,))
         except:
             return {'message': 'Error during execution of MySQL commands'}, 502
         if(rowCnt>0):
             cursor.execute("UPDATE stations SET Name=(%s), refTime=(%s), temperature=(%s), humidity=(%s), lux=(%s), soil=(%s), battery=(%s), co2=(%s) WHERE StationID=(%s)",
-                           (thwart(_stationName), thwart(_stationrefTime),
-                            thwart(_stationSettings[0]), thwart(_stationSettings[1]),
-                            thwart(_stationSettings[2]), thwart(_stationSettings[3]), thwart(_stationSettings[4])
-                            , thwart(_stationSettings[5]), thwart(_stationID)))
+                           (_stationName, _stationrefTime,
+                            _stationSettings[0], _stationSettings[1],
+                            _stationSettings[2], _stationSettings[3], _stationSettings[4]
+                            , _stationSettings[5], _stationID))
             return {'message': 'OK'}, 200
         return {'message':'Station does not exist'},422
 
@@ -305,14 +303,14 @@ class AddStation(Resource):
             return {'message': 'No MySQL connection'}, 503
         try:
             cursor.execute('USE %s' % (session['username'],))
-            rowCnt = cursor.execute("SELECT * FROM stations WHERE StationID = (%s)", (thwart(_stationID,)))
+            rowCnt = cursor.execute("SELECT * FROM stations WHERE StationID = (%s)", (_stationID,))
         except:
             return {'message': 'Error during execution of MySQL commands'}, 502
         if(rowCnt==0):
             cursor.execute("INSERT INTO stations (StationID, Name, refTime, temperature, humidity, lux, soil, battery, co2) values ((%s),(%s),(%s),(%s),(%s),(%s),(%s),(%s),(%s))",
-                           (thwart(_stationID), thwart(_stationName),thwart(_stationrefTime),thwart(_stationSettings[0]),thwart(_stationSettings[1]),
-                            thwart(_stationSettings[2]),thwart(_stationSettings[3]),thwart(_stationSettings[4])
-                            ,thwart(_stationSettings[5])))
+                           (_stationID, _stationName,_stationrefTime,_stationSettings[0],_stationSettings[1],
+                            _stationSettings[2],_stationSettings[3],_stationSettings[4]
+                            ,_stationSettings[5]))
             return {'message': 'OK'}, 200
         return {'message':'Station already exist'},422
 class RemoveStation(Resource):
@@ -329,7 +327,7 @@ class RemoveStation(Resource):
             return {'message': 'No MySQL connection'}, 503
         try:
             cursor.execute('USE %s' % (session['username'],))
-            rowCnt = cursor.execute("DELETE FROM stations WHERE StationID = (%s)", (thwart(_stationID,)))
+            rowCnt = cursor.execute("DELETE FROM stations WHERE StationID = (%s)", (_stationID,))
             return {'message': 'OK'}, 200
         except:
             return {'message': 'Error during execution of MySQL commands'}, 502
