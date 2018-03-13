@@ -5,17 +5,13 @@ from flask import session
 from flask import request
 from functools import wraps
 from flask import jsonify
+from DatabaseUtility import DatabaseUtility,DBException
 import mysql.connector
 import gc
 
 mysql = MySQL()
 app = Flask(__name__)
 
-# MySQL configurations
-app.config['MYSQL_DATABASE_USER'] = 'root'
-app.config['MYSQL_DATABASE_PASSWORD'] = ''
-app.config['MYSQL_DATABASE_DB'] = 'environment'
-app.config['MYSQL_DATABASE_HOST'] = 'localhost'
 import logging
 logging.basicConfig()
 log = logging.getLogger()
@@ -38,7 +34,7 @@ class LogOut(Resource):
     def get(self):
         session.clear()
         gc.collect()
-        return {'status':200, 'message':'Logged Out'},200
+        return {'message':'Logged Out'},200
         
 class AuthenticateUser(Resource):
     def post(self):
@@ -48,17 +44,12 @@ class AuthenticateUser(Resource):
         except KeyError as e:
             return {'message': 'There are missing arguments in the request.'}, 400
         try:
-            conn = mysql.connect()
-            cursor = conn.cursor()
-        except:
-            return {'message': 'Can\'t connect to the database'}, 503
-        try:
-            cursor.execute('USE dbUsers')
-            rowCnt = cursor.execute("SELECT * FROM users WHERE Email = (%s)", (_userEmail,))
-        except:
-            return {'message': 'Query Error'}, 502
-        if(rowCnt>0):
-            data = cursor.fetchall()
+            db = DatabaseUtility()
+            db.ChangeDatabase('dbUsers')
+            data = db.RunCommand("SELECT * FROM users WHERE Email = (%s)", (_userEmail,))
+        except DBException as e:
+            return {'message': e.msg}, 502
+        if(data is not None):
             if(_userPassword == str(data[0][3])):
                 session['logged_in'] = True
                 session['username'] = str(data[0][1])
@@ -66,7 +57,6 @@ class AuthenticateUser(Resource):
             else:
                 return {'message': 'Wrong username or password'},422
         return {'message':'No username found'},422
-
 class AddItem(Resource):
     @LoginRequired
     def post(self):
@@ -79,19 +69,14 @@ class AddItem(Resource):
             _co2 = str(request.form['co2'])
             _battery = str(request.form['battery'])
         except KeyError as e:
-            return {'message':'keyError'},400
+            return {'message':'There are missing arguments in the request.'},400
         try:
-            conn = mysql.connect()
-            cursor = conn.cursor()
-        except:
-            return {'message':'No MySQL connection'},503
-        try:
-            cursor.execute("USE %s"%(session['username'],))
-            cursor.execute("INSERT INTO measurements (StationID,temperature,humidity,lux,soil,co2,battery) VALUES ((%s), (%s), (%s), (%s), (%s), (%s), (%s))",(_stationID,_temperature,_humidity,_lux,_soil,_co2,_battery))
-            conn.commit()
-        except:
-            return {'message': 'Error during execution of MySQL commands'},502
-        return {'StatusCode':'200','Message': 'Success'}
+            db = DatabaseUtility()
+            db.ChangeDatabase(session['username'])
+            db.RunCommand("INSERT INTO measurements (StationID,temperature,humidity,lux,soil,co2,battery) VALUES ((%s), (%s), (%s), (%s), (%s), (%s), (%s))",(_stationID,_temperature,_humidity,_lux,_soil,_co2,_battery))
+        except DBException as e:
+            return {'message': e.msg},502
+        return {'message': 'OK'},200
         
 class CreateUser(Resource):
     def post(self):
@@ -101,49 +86,43 @@ class CreateUser(Resource):
             _userName = request.form['userName']
             _userPhone = request.form['phone']
         except KeyError as e:
-            return {'message': 'keyError'}, 400
+            return {'message': 'There are missing arguments in the request.'}, 400
         try:
-            conn = mysql.connect()
-            cursor = conn.cursor()
-        except:
-            return {'message': 'No MySQL connection'}, 503
-        try:
-            cursor.execute('USE dbUsers')
-            cursor.execute("SELECT EXISTS (SELECT 1 FROM users WHERE Email = (%s))",(_userEmail))
-            data = cursor.fetchall()
+            db = DatabaseUtility()
+            db.ChangeDatabase('USE dbUsers')
+            data = db.RunCommand("SELECT EXISTS (SELECT 1 FROM users WHERE Email = (%s))",(_userEmail))
             if(data[0][0] == 1):
-                return {'StatusCode':422, 'Message': 'Email already taken'}
-            else:
-                cursor.execute("INSERT INTO users (UserName,Email,Password,Phone) values ((%s), (%s), (%s) ,(%s))", (_userName,_userEmail,_userPassword,_userPhone))
-                cursor.execute("CREATE DATABASE %s"%(_userName,))
-                cursor.execute("USE %s"%(_userName,))
-                cursor.execute("CREATE TABLE stations (StationID INT NOT NULL, Name varchar(45), PRIMARY KEY(StationID))")
-                cursor.execute("CREATE TABLE measurements (StationID INT NOT NULL, temperature DECIMAL(3,1), humidity DECIMAL(4,1), lux SMALLINT UNSIGNED, soil DECIMAL(4,1), co2 SMALLINT UNSIGNED, battery DECIMAL(3,0), measurementDate TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL, FOREIGN KEY (StationID) REFERENCES stations(StationID))")
-                conn.commit()
-                return {'StatusCode': 200, 'Message': 'Done'}
-        except Exception as e:
-            return{'message': 'Error during execution of MySQL commands'}, 502
+                return {'message': 'Email already taken'},422
+            data = db.RunCommand("SELECT EXISTS (SELECT 1 FROM users WHERE UserName = (%s))", (_userName))
+            if(data[0][0] == 1):
+                return {'message': 'Username already taken'},422
+            db.RunCommand("INSERT INTO users (UserName,Email,Password,Phone) values ((%s), (%s), (%s) ,(%s))", (_userName,_userEmail,_userPassword,_userPhone))
+            db.RunCommand("CREATE DATABASE %s"%(_userName,))
+            db.ChangeDatabase(_userName)
+            db.RunCommand("CREATE TABLE stations (StationID INT NOT NULL, Name varchar(45) NOT NULL, PRIMARY KEY(StationID))")
+            db.RunCommand(("CREATE TABLE measurements (StationID INT NOT NULL, temperature DECIMAL(3,1), humidity DECIMAL(4,1), "
+                               "lux SMALLINT UNSIGNED, soil DECIMAL(4,1), co2 SMALLINT UNSIGNED, battery DECIMAL(3,0), measurementDate "
+                               "TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL, FOREIGN KEY (StationID) REFERENCES stations(StationID))"))
+            return {'message': 'OK'},200
+        except DBException as e:
+            return{'message': e.msg}, 502
+
 class CheckEmail(Resource):
     def post(self):
         try:
             userEmail = request.form['email']
         except KeyError as e:
-            return {'message': 'keyError'}, 400
+            return {'message': 'There are missing arguments in the request.'}, 400
         try:
-            conn = mysql.connect()
-            cursor = conn.cursor()
-        except:
-            return {'message': 'No MySQL connection'}, 503
-        try:
-            cursor.execute('USE dbUsers')
-            cursor.execute("SELECT EXISTS (SELECT 1 FROM users WHERE Email = (%s))", (userEmail))
-            data = cursor.fetchall()
-        except:
-            return {'message': 'Error during execution of MySQL commands'}, 502
-        if(data[0][0] == 1):
-            return {'StatusCode':422, 'Message': 'Email already taken'}
-        else:
-            return {'StatusCode': 200, 'Message': 'Email available'}
+            db = DatabaseUtility()
+            db.ChangeDatabase('dbUsers')
+            data = db.RunCommand("SELECT EXISTS (SELECT 1 FROM users WHERE Email = (%s))", (userEmail))
+            if(data[0][0] == 1):
+                return {'message': 'Email already taken'},200
+            else:
+                return {'message': 'Email available'},200
+        except DBException as e:
+            return {'message': e.msg},400
 class GetDaily(Resource):
     @LoginRequired
     def get(self):
@@ -151,8 +130,6 @@ class GetDaily(Resource):
             dateStart = request.args.get('date1', default=None, type = str)
             dateEnd = request.args.get('date2', default=None, type=str)
             station = request.args.get('station',default='1', type=str)
-            #measurement = request.args.get('m', default = 'temperature', type=str)
-            session['username'] = 'environment'
             if(dateStart is None):
                 return {'message':'Start date not specified'},404
             try:
@@ -233,17 +210,9 @@ class GetStations(Resource):
     @LoginRequired
     def get(self):
         try:
-            try:
-                conn = mysql.connect()
-                cursor = conn.cursor()
-            except:
-                return {'message': 'No MySQL connection'}, 503
-            try:
-                cursor.execute('USE %s' % (session['username'],))
-                cursor.execute("select StationID,Name,DATE_FORMAT(refTime,'%T') as refTime,temperature,humidity,lux,soil,battery,co2 from stations")
-                rows = cursor.fetchall()
-            except:
-                return {'message': 'Error during execution of MySQL commands'}, 502
+            db = DatabaseUtility()
+            db.ChangeDatabase(session['username'])
+            rows = db.RunCommand("select StationID,Name,DATE_FORMAT(refTime,'%T') as refTime,temperature,humidity,lux,soil,battery,co2 from stations")
             a = []
             for row in rows:
                 message={}
@@ -255,8 +224,8 @@ class GetStations(Resource):
             resp = jsonify({'stations': a})
             resp.status_code = 200
             return resp
-        except Exception as e:
-            return {'error',str(e)},404
+        except DBException as e:
+            return {'message': e.msg},400
 class ModStation(Resource):
     @LoginRequired
     def post(self):
@@ -268,22 +237,18 @@ class ModStation(Resource):
         except KeyError as e:
             return {'message': 'There are missing arguments in the request.'}, 400
         try:
-            conn = mysql.connect()
-            cursor = conn.cursor()
-        except:
-            return {'message': 'No MySQL connection'}, 503
-        try:
-            cursor.execute('USE %s' % (session['username'],))
-            rowCnt = cursor.execute("SELECT * FROM stations WHERE StationID = (%s)", (_stationID,))
-        except:
-            return {'message': 'Error during execution of MySQL commands'}, 502
-        if(rowCnt>0):
-            cursor.execute("UPDATE stations SET Name=(%s), refTime=(%s), temperature=(%s), humidity=(%s), lux=(%s), soil=(%s), battery=(%s), co2=(%s) WHERE StationID=(%s)",
+            db = DatabaseUtility()
+            db.ChangeDatabase(session['username'])
+            rowCnt = db.RunCommand("SELECT * FROM stations WHERE StationID = (%s)", (_stationID,))
+            if(rowCnt>0):
+                db.RunCommand(("UPDATE stations SET Name=(%s), refTime=(%s), temperature=(%s), humidity=(%s), lux=(%s), soil=(%s), battery=(%s), co2=(%s) WHERE StationID=(%s)",
                            (_stationName, _stationrefTime,
                             _stationSettings[0], _stationSettings[1],
                             _stationSettings[2], _stationSettings[3], _stationSettings[4]
-                            , _stationSettings[5], _stationID))
-            return {'message': 'OK'}, 200
+                            , _stationSettings[5], _stationID)))
+                return {'message': 'OK'}, 200
+        except DBException as e:
+            return {'message':e.msg}, 400
         return {'message':'Station does not exist'},422
 
 class AddStation(Resource):
@@ -297,21 +262,17 @@ class AddStation(Resource):
         except KeyError as e:
             return {'message': 'There are missing arguments in the request.'}, 400
         try:
-            conn = mysql.connect()
-            cursor = conn.cursor()
-        except:
-            return {'message': 'No MySQL connection'}, 503
-        try:
-            cursor.execute('USE %s' % (session['username'],))
-            rowCnt = cursor.execute("SELECT * FROM stations WHERE StationID = (%s)", (_stationID,))
-        except:
-            return {'message': 'Error during execution of MySQL commands'}, 502
-        if(rowCnt==0):
-            cursor.execute("INSERT INTO stations (StationID, Name, refTime, temperature, humidity, lux, soil, battery, co2) values ((%s),(%s),(%s),(%s),(%s),(%s),(%s),(%s),(%s))",
+            db = DatabaseUtility()
+            db.ChangeDatabase(session['username'])
+            rowCnt  = db.RunCommand("SELECT * FROM stations WHERE StationID = (%s)", (_stationID,))
+            if(rowCnt==0):
+                db.RunCommand(("INSERT INTO stations (StationID, Name, refTime, temperature, humidity, lux, soil, battery, co2) values ((%s),(%s),(%s),(%s),(%s),(%s),(%s),(%s),(%s))",
                            (_stationID, _stationName,_stationrefTime,_stationSettings[0],_stationSettings[1],
                             _stationSettings[2],_stationSettings[3],_stationSettings[4]
-                            ,_stationSettings[5]))
-            return {'message': 'OK'}, 200
+                            ,_stationSettings[5])))
+                return {'message': 'OK'}, 200
+        except DBException as e:
+            return {'message':e.msg},400
         return {'message':'Station already exist'},422
 class RemoveStation(Resource):
     @LoginRequired
@@ -319,18 +280,15 @@ class RemoveStation(Resource):
         try:
             _stationID = request.form['StationID']
         except KeyError as e:
-            return {'message': 'keyError'}, 400
+            return {'message': 'There are missing arguments in the request.'}, 400
         try:
-            conn = mysql.connect()
-            cursor = conn.cursor()
-        except:
-            return {'message': 'No MySQL connection'}, 503
-        try:
-            cursor.execute('USE %s' % (session['username'],))
-            rowCnt = cursor.execute("DELETE FROM stations WHERE StationID = (%s)", (_stationID,))
+            db = DatabaseUtility()
+            db.ChangeDatabase(session['username'])
+            db.RunCommand("DELETE FROM stations WHERE StationID = (%s)", (_stationID,))
             return {'message': 'OK'}, 200
-        except:
-            return {'message': 'Error during execution of MySQL commands'}, 502
+        except DBException as e:
+            return {'message': e.msg}, 502
+
 api.add_resource(CreateUser, '/CreateUser')
 api.add_resource(AuthenticateUser, '/LogIn')
 api.add_resource(LogOut,'/LogOut')
