@@ -4,7 +4,6 @@ from datetime import datetime
 
 class DBException(Exception):
     def __init__(self, msg):
-        super.__init__()
         self.msg = msg
 ##===============================================
 
@@ -13,6 +12,7 @@ class DatabaseUtility:
         self.cnx = mysql.connector.connect(user='root',
                                            password='',
                                            host='localhost')
+        self.cnx.database = "dbUsers"
         self.cursor = self.cnx.cursor()
     def ChangeDatabase(self, databaseName):
         try:
@@ -30,13 +30,13 @@ class DatabaseUtility:
             raise DBException("Failed creating database: {}".format(err))
 
 
-    def RunCommand(self, cmd):
-        print("RUNNING COMMAND: " + cmd)
+    def RunCommand(self, cmd, args = tuple()):
+        print("RUNNING COMMAND: " + cmd%args)
         try:
-            self.cursor.execute(cmd)
+            self.cursor.execute(cmd, args)
         except mysql.connector.Error as err:
             print('ERROR MESSAGE: ' + str(err.msg))
-            print('WITH ' + cmd)
+            print('WITH ' + cmd%args)
             raise DBException("Error occurred during query execution.")
         try:
             msg = self.cursor.fetchall()

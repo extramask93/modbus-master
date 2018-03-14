@@ -4,6 +4,7 @@ from flaskext.mysql import MySQL
 from flask import session
 from flask import request
 from functools import wraps
+import re
 from flask import jsonify
 from DatabaseUtility import DatabaseUtility,DBException
 import mysql.connector
@@ -46,17 +47,18 @@ class AuthenticateUser(Resource):
         try:
             db = DatabaseUtility()
             db.ChangeDatabase('dbUsers')
-            data = db.RunCommand("SELECT * FROM users WHERE Email = (%s)", (_userEmail,))
+            data = db.RunCommand("SELECT * FROM users WHERE Email = %s;",(_userEmail,))
         except DBException as e:
             return {'message': e.msg}, 502
-        if(data is not None):
+        try:
             if(_userPassword == str(data[0][3])):
                 session['logged_in'] = True
                 session['username'] = str(data[0][1])
                 return {'message':'OK'},200
-            else:
-                return {'message': 'Wrong username or password'},422
-        return {'message':'No username found'},422
+        except:
+            return {'message': 'Wrong username or password'}, 422
+        else:
+            return {'message': 'Wrong username or password'}, 422
 class AddItem(Resource):
     @LoginRequired
     def post(self):
@@ -73,11 +75,11 @@ class AddItem(Resource):
         try:
             db = DatabaseUtility()
             db.ChangeDatabase(session['username'])
-            db.RunCommand("INSERT INTO measurements (StationID,temperature,humidity,lux,soil,co2,battery) VALUES ((%s), (%s), (%s), (%s), (%s), (%s), (%s))",(_stationID,_temperature,_humidity,_lux,_soil,_co2,_battery))
+            db.RunCommand("INSERT INTO measurements (StationID,temperature,humidity,lux,soil,co2,battery) VALUES ((%s), (%s), (%s), (%s), (%s), (%s), (%s))",
+                          (_stationID,_temperature,_humidity,_lux,_soil,_co2,_battery))
         except DBException as e:
             return {'message': e.msg},502
         return {'message': 'OK'},200
-        
 class CreateUser(Resource):
     def post(self):
         try:
@@ -87,17 +89,19 @@ class CreateUser(Resource):
             _userPhone = request.form['phone']
         except KeyError as e:
             return {'message': 'There are missing arguments in the request.'}, 400
+        if(re.search("^[^\\/\?\%\*:\|\"<>\.\s]{1,64}$",_userName) is None):
+            return {'message': "Username should consist only of letters and numbers"}
         try:
             db = DatabaseUtility()
-            db.ChangeDatabase('USE dbUsers')
-            data = db.RunCommand("SELECT EXISTS (SELECT 1 FROM users WHERE Email = (%s))",(_userEmail))
+            db.ChangeDatabase('dbUsers')
+            data = db.RunCommand("SELECT EXISTS (SELECT 1 FROM users WHERE Email = '{0}')".format(_userEmail))
             if(data[0][0] == 1):
                 return {'message': 'Email already taken'},422
-            data = db.RunCommand("SELECT EXISTS (SELECT 1 FROM users WHERE UserName = (%s))", (_userName))
+            data = db.RunCommand("SELECT EXISTS (SELECT 1 FROM users WHERE UserName = '{0}')".format(_userName))
             if(data[0][0] == 1):
                 return {'message': 'Username already taken'},422
-            db.RunCommand("INSERT INTO users (UserName,Email,Password,Phone) values ((%s), (%s), (%s) ,(%s))", (_userName,_userEmail,_userPassword,_userPhone))
-            db.RunCommand("CREATE DATABASE %s"%(_userName,))
+            db.RunCommand("INSERT INTO users (UserName,Email,Password,Phone) values (%s, %s, %s ,%s)", (_userName,_userEmail,_userPassword,_userPhone))
+            db.RunCommand("CREATE DATABASE {0}".format(_userName))
             db.ChangeDatabase(_userName)
             db.RunCommand("CREATE TABLE stations (StationID INT NOT NULL, Name varchar(45) NOT NULL, PRIMARY KEY(StationID))")
             db.RunCommand(("CREATE TABLE measurements (StationID INT NOT NULL, temperature DECIMAL(3,1), humidity DECIMAL(4,1), "
@@ -106,6 +110,8 @@ class CreateUser(Resource):
             return {'message': 'OK'},200
         except DBException as e:
             return{'message': e.msg}, 502
+        except:
+            return {'message': "Internal server error"},405
 
 class CheckEmail(Resource):
     def post(self):
@@ -116,7 +122,7 @@ class CheckEmail(Resource):
         try:
             db = DatabaseUtility()
             db.ChangeDatabase('dbUsers')
-            data = db.RunCommand("SELECT EXISTS (SELECT 1 FROM users WHERE Email = (%s))", (userEmail))
+            data = db.RunCommand("SELECT EXISTS (SELECT 1 FROM users WHERE Email = {0})".format(userEmail))
             if(data[0][0] == 1):
                 return {'message': 'Email already taken'},200
             else:
@@ -132,67 +138,51 @@ class GetDaily(Resource):
             station = request.args.get('station',default='1', type=str)
             if(dateStart is None):
                 return {'message':'Start date not specified'},404
-            try:
-                conn = mysql.connect()
-                cursor = conn.cursor()
-            except:
-                return {'message': 'No MySQL connection'}, 503
-            try:
-                cursor.execute('USE %s' % (session['username'],))
-                if(dateEnd is None):
-                    cursor.execute("SELECT * from measurements WHERE measurementDate >= (%s) AND StationID = (%s)" , (dateStart,station))
-                else:
-                    cursor.execute("SELECT * from measurements WHERE measurementDate BETWEEN (%s) AND (%s) AND StationID = (%s)", (dateStart, dateEnd, station))
-                rows = cursor.fetchall()
-            except:
-                return {'message': 'Error during execution of MySQL commands'}, 502
-            a = []
-            for row in rows:
-                message={}
-                message['StationID']=str(row[0])
-                message['temperature']=str(row[1])
-                message['humidity'] = str(row[2])
-                message['lux'] = str(row[3])
-                message['soil'] = str(row[4])
-                message['co2'] = str(row[5])
-                message['battery'] = str(row[6])
-                message['measurementDate'] = str(row[7])
-                a.append(message)
-            resp = jsonify({'measurements': a})
-            resp.status_code = 200
-            return resp
-        except Exception as e:
-            return {'error',str(e)},404
+            db = DatabaseUtility()
+            db.ChangeDatabase(session['username'])
+            if(dateEnd is None):
+                rows = db.RunCommand("SELECT * from measurements WHERE measurementDate >= (%s) AND StationID = (%s)" , (dateStart,station))
+            else:
+                rows = db.RunCommand("SELECT * from measurements WHERE measurementDate BETWEEN (%s) AND (%s) AND StationID = (%s)", (dateStart, dateEnd, station))
+        except DBException as e:
+            return {'message': e.msg}, 502
+        a = []
+        for row in rows:
+            message={}
+            message['StationID']=str(row[0])
+            message['temperature']=str(row[1])
+            message['humidity'] = str(row[2])
+            message['lux'] = str(row[3])
+            message['soil'] = str(row[4])
+            message['co2'] = str(row[5])
+            message['battery'] = str(row[6])
+            message['measurementDate'] = str(row[7])
+            a.append(message)
+        resp = jsonify({'measurements': a})
+        resp.status_code = 200
+        return resp
 class GetPeriodical(Resource):
     @LoginRequired
     def get(self):
-        try:
             period = request.args.get('period', default='week', type = str)
             type = request.args.get('type', default='temperature', type=str)
             station = request.args.get('station',default='1', type=str)
             nrOfintervals = request.args.get('interval', default = '100', type=str)
-            session['username'] = 'environment'
             intervals = int(nrOfintervals)
             try:
-                conn = mysql.connect()
-                cursor = conn.cursor()
-            except:
-                return {'message': 'No MySQL connection'}, 503
-            try:
-                cursor.execute('USE %s' % (session['username'],))
+                db = DatabaseUtility()
+                db.ChangeDatabase(session['username'])
                 dict = {'day':1,'week':7,'3days':3,'month':31,'3months':93,'year':365 }
                 az = "select StationID,avg({0}) as {0}, convert(min(measurementDate),datetime) as time from measurements where measurementDate between date_sub(now(), interval {1} day) and now() and StationID={2} group by measurementDate div (select ((unix_timestamp() - unix_timestamp())+ ({1} * 864000)) div {3} as tmp),StationID".format(type,dict[period],station,nrOfintervals)
                 ay="select count(StationID) from measurements where measurementDate between date_sub(now(), interval {0} day) and now() and StationID = {1}".format(dict[period],station)
-                cursor.execute(ay)
-                nr = cursor.fetchone()
+                nr = db.RunCommand(ay)
                 log.debug(nr[0])
                 if(int(nr[0]) <= int(nrOfintervals)):
-                    cursor.execute("select StationID,{0},measurementDate from measurements where measurementDate between date_sub(now(), interval {1} day) and now() and StationID = {2}".format(type,dict[period],station))
+                    rows = db.RunCommand("select StationID,{0},measurementDate from measurements where measurementDate between date_sub(now(), interval {1} day) and now() and StationID = {2}".format(type,dict[period],station))
                 else:
-                    cursor.execute(az)
-            except:
-                return {'message': 'error'}, 502
-            rows = cursor.fetchall()
+                    rows = db.RunCommand(az)
+            except DBException as e:
+                return {'message': e.msg}, 400
             a = []
             for row in rows:
                 message={}
@@ -203,16 +193,14 @@ class GetPeriodical(Resource):
             resp = jsonify({'measurements': a})
             resp.status_code = 200
             return resp
-        except Exception as e:
-            return {'error',str(e)},404
-
 class GetStations(Resource):
     @LoginRequired
     def get(self):
         try:
-            db = DatabaseUtility()
+            db = DatabaseUtility() #change time to int with nr of seconds !!
             db.ChangeDatabase(session['username'])
-            rows = db.RunCommand("select StationID,Name,DATE_FORMAT(refTime,'%T') as refTime,temperature,humidity,lux,soil,battery,co2 from stations")
+            db.cursor.execute("select StationID,Name,refTime,temperature,humidity,lux,soil,battery,co2 from stations")
+            rows = db.cursor.fetchall()
             a = []
             for row in rows:
                 message={}

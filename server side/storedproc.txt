@@ -1,0 +1,6 @@
+DELIMITER //
+
+CREATE PROCEDURE `p2` ()
+BEGIN
+    select StationID,Name,DATE_FORMAT(refTime,'%%T') as refTime,temperature,humidity,lux,soil,battery,co2 from stations
+END//
