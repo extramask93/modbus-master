@@ -176,8 +176,8 @@ class GetPeriodical(Resource):
                 az = "select StationID,avg({0}) as {0}, convert(min(measurementDate),datetime) as time from measurements where measurementDate between date_sub(now(), interval {1} day) and now() and StationID={2} group by measurementDate div (select ((unix_timestamp() - unix_timestamp())+ ({1} * 864000)) div {3} as tmp),StationID".format(type,dict[period],station,nrOfintervals)
                 ay="select count(StationID) from measurements where measurementDate between date_sub(now(), interval {0} day) and now() and StationID = {1}".format(dict[period],station)
                 nr = db.RunCommand(ay)
-                log.debug(nr[0])
-                if(int(nr[0]) <= int(nrOfintervals)):
+                log.debug(nr[0][0])
+                if(int(nr[0][0]) <= int(nrOfintervals)):
                     rows = db.RunCommand("select StationID,{0},measurementDate from measurements where measurementDate between date_sub(now(), interval {1} day) and now() and StationID = {2}".format(type,dict[period],station))
                 else:
                     rows = db.RunCommand(az)
@@ -197,10 +197,9 @@ class GetStations(Resource):
     @LoginRequired
     def get(self):
         try:
-            db = DatabaseUtility() #change time to int with nr of seconds !!
+            db = DatabaseUtility() #done
             db.ChangeDatabase(session['username'])
-            db.cursor.execute("select StationID,Name,refTime,temperature,humidity,lux,soil,battery,co2 from stations")
-            rows = db.cursor.fetchall()
+            rows = db.RunCommand("select StationID,Name,refTime,temperature,humidity,lux,soil,battery,co2 from stations")
             a = []
             for row in rows:
                 message={}
@@ -227,13 +226,13 @@ class ModStation(Resource):
         try:
             db = DatabaseUtility()
             db.ChangeDatabase(session['username'])
-            rowCnt = db.RunCommand("SELECT * FROM stations WHERE StationID = (%s)", (_stationID,))
-            if(rowCnt>0):
-                db.RunCommand(("UPDATE stations SET Name=(%s), refTime=(%s), temperature=(%s), humidity=(%s), lux=(%s), soil=(%s), battery=(%s), co2=(%s) WHERE StationID=(%s)",
+            rowCnt = db.RunCommand("SELECT EXISTS (SELECT 1 FROM stations WHERE StationID = %s)", (_stationID,)) #change to select exist
+            if(rowCnt[0][0] == 1):
+                db.RunCommand("UPDATE stations SET Name=%s, refTime=%s, temperature=%s, humidity=%s, lux=%s, soil=%s, battery=%s, co2=%s WHERE StationID=%s",
                            (_stationName, _stationrefTime,
                             _stationSettings[0], _stationSettings[1],
                             _stationSettings[2], _stationSettings[3], _stationSettings[4]
-                            , _stationSettings[5], _stationID)))
+                            , _stationSettings[5], _stationID))
                 return {'message': 'OK'}, 200
         except DBException as e:
             return {'message':e.msg}, 400
@@ -252,12 +251,12 @@ class AddStation(Resource):
         try:
             db = DatabaseUtility()
             db.ChangeDatabase(session['username'])
-            rowCnt  = db.RunCommand("SELECT * FROM stations WHERE StationID = (%s)", (_stationID,))
-            if(rowCnt==0):
-                db.RunCommand(("INSERT INTO stations (StationID, Name, refTime, temperature, humidity, lux, soil, battery, co2) values ((%s),(%s),(%s),(%s),(%s),(%s),(%s),(%s),(%s))",
+            rowCnt = db.RunCommand("SELECT EXISTS (SELECT 1 FROM stations WHERE StationID = %s)", (_stationID,)) #change to select exist
+            if(rowCnt[0][0] == 0):
+                db.RunCommand("INSERT INTO stations (StationID, Name, refTime, temperature, humidity, lux, soil, battery, co2) values ((%s),(%s),(%s),(%s),(%s),(%s),(%s),(%s),(%s))",
                            (_stationID, _stationName,_stationrefTime,_stationSettings[0],_stationSettings[1],
                             _stationSettings[2],_stationSettings[3],_stationSettings[4]
-                            ,_stationSettings[5])))
+                            ,_stationSettings[5]))
                 return {'message': 'OK'}, 200
         except DBException as e:
             return {'message':e.msg},400
