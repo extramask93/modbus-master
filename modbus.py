@@ -1,5 +1,7 @@
 from pymodbus.client.sync import ModbusSerialClient as ModbusClient
 from pymodbus.exceptions import *
+from pymodbus.constants import Defaults
+
 from ConfigReader import ConfigReader
 from Client import Client, DummyClient
 import time
@@ -20,10 +22,15 @@ log.setLevel(logging.DEBUG)
 #---------------------------------------------------------------------------# 
 def ReadRegisters(client,unit_,address,nrOfReg, enables):
     try:
-        rr = client.read_input_registers(address, nrOfReg, unit = unit_)
-        if(isinstance(rr,ModbusException)):
-            print(str(rr))
-            return
+        for i in range(0,3):
+            rr = client.read_input_registers(address, nrOfReg, unit = unit_)
+            if(isinstance(rr,ModbusException)):
+                log.debug("retrying..")
+                print(str(rr))
+                if(i>=2):
+                    return
+            else:
+                break
     except:
         return
     if(rr is None):
@@ -34,6 +41,9 @@ def ReadRegisters(client,unit_,address,nrOfReg, enables):
         return
     print(rr.registers)
     try:
+        for reg in rr.registers:
+            if(reg == 65535):
+                raise Exception()
         data = {'stationID': unit_, 'temperature': (rr.registers[0]/10), 'humidity': (rr.registers[1]/10), 'lux':rr.registers[2], 'soil':rr.registers[3],
                 'battery': rr.registers[4], 'co2': rr.registers[5]}
     except Exception as e:
@@ -73,10 +83,11 @@ if __name__ == "__main__":
     # Init modbus
     # ---------------------------------------------------------------------------#
     serial = configReader.GetSectionMap("SERIAL");
-    client = ModbusClient(method='rtu', port=serial["port"], timeout=int(serial["timeout"]),
+    client = ModbusClient(method='rtu', port=serial["port"], timeout=1,
                           baudrate=int(serial["baud"]), bytesize=int(serial["databits"]),
                           stopbits=int(serial["stopbits"]), parity=serial["parity"],
                           rtscts=int(serial["rtscts"]))
+    Defaults.Timeout = 1
     print("Connecting to {0}...".format(serial['port']))
     if (client.connect()):
         print("connected")
